@@ -35,22 +35,31 @@ ytdl = yt_dlp.YoutubeDL(ytdl_format_options)
 queue = asyncio.Queue()
 
 
+async def check_queue(ctx):
+    if queue.qsize() > 0:
+        await player_loop(ctx)
+
+
 async def player_loop(ctx):
     """Our main player loop."""
     await bot.wait_until_ready()
-
     while not bot.is_closed():
-        if not ctx.voice_client.is_playing():
+        try:
             source = await queue.get()
-            duration = source.get('duration')
-            print(duration)
             async with ctx.typing():
                 voice = get(bot.voice_clients, guild=ctx.guild)
-
                 URL = source.get('url')
-                voice.play(discord.FFmpegOpusAudio(URL, **ffmpeg_options))
-
+                try:
+                    voice.play(discord.FFmpegOpusAudio(URL, **ffmpeg_options),
+                               after=lambda _: (await check_queue(ctx)
+                                                for _ in '_').__anext__())
+                except:
+                    await queue.put(source)
+                    continue
             await ctx.send('**Reproduciendo:** {}'.format(source.get("title")))
+        except AttributeError:
+            await ctx.send(
+                "Por favor, vuélveme a decir que vaya al canal de voz.")
 
 
 class YTDLSource(discord.PCMVolumeTransformer):
@@ -103,7 +112,6 @@ async def join(ctx):
     else:
         channel = ctx.message.author.voice.channel
     await channel.connect()
-    ctx.bot.loop.create_task(player_loop(ctx))
     await ctx.send("¡Hola!")
 
 
@@ -129,6 +137,22 @@ async def play(ctx, *, url):
     for i in info['entries']:
         Entries.append(i)
     await queue.put(Entries[0])
+    await check_queue(ctx)
+
+
+@bot.command(
+    name='añade',
+    help='Añade una canción a la cola mientras otra se está reproduciendo.')
+async def add(ctx, *, url):
+    with yt_dlp.YoutubeDL(ytdl_format_options) as ydl:
+        info = ydl.extract_info(url, download=False)
+    Entries = []
+    for i in info['entries']:
+        Entries.append(i)
+    await ctx.send("¡Canción {} añadida a la cola!".format(
+        Entries[0].get("title")))
+    await ctx.send("Hay {} canciones en la cola.".format(queue.qsize()+1))
+    await queue.put(Entries[0])
 
 
 @bot.command(name='pausa', help='Pon la canción en pausa.')
@@ -151,9 +175,25 @@ async def resume(ctx):
 
 @bot.command(name='para', help='Para la canción.')
 async def stop(ctx):
+    a = []
+    while not queue.empty():
+        a.append(queue.get_nowait())
+        print("a")
     voice_client = ctx.message.guild.voice_client
     if voice_client.is_playing():
         voice_client.stop()
+        await ctx.send("¡Como digas!")
+    else:
+        await ctx.send("Lo siento, no estoy tocando nada.")
+
+
+@bot.command(name='siguiente',
+             help='Reproduce la siguiente canción de la cola.')
+async def next(ctx):
+    voice_client = ctx.message.guild.voice_client
+    if voice_client.is_playing():
+        voice_client.stop()
+        await ctx.send("¡Marchando!")
     else:
         await ctx.send("Lo siento, no estoy tocando nada.")
 
@@ -166,5 +206,5 @@ async def queue_info(ctx):
 keep_alive.keep_alive()
 if __name__ == "__main__":
     bot.run(
-        "token"
+        "MTAwNDcwNDg2NjU4MjY3MTQ2MQ.GN82Q-.GZhHPTuvsWjl4GoGJIpBI8RH7hbUmY74ZPvIhU"
     )
