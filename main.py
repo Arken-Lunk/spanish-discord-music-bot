@@ -33,6 +33,7 @@ ffmpeg_options = {
 ytdl = yt_dlp.YoutubeDL(ytdl_format_options)
 
 queue = asyncio.Queue()
+dict = {}
 
 
 async def check_queue(ctx):
@@ -45,9 +46,12 @@ async def player_loop(ctx):
     await bot.wait_until_ready()
     while not bot.is_closed():
         try:
-            source = await queue.get()
+            origin = await queue.get()
+            for key, val in origin.items():
+                guild = bot.get_guild(key)
+                source = val
             async with ctx.typing():
-                voice = get(bot.voice_clients, guild=ctx.guild)
+                voice = get(bot.voice_clients, guild=guild)
                 URL = source.get('url')
                 try:
                     voice.play(discord.FFmpegOpusAudio(URL, **ffmpeg_options),
@@ -113,6 +117,7 @@ async def join(ctx):
         channel = ctx.message.author.voice.channel
     await channel.connect()
     await ctx.send("¡Hola!")
+    print(ctx.guild)
 
 
 @bot.command(name='fuera', help='Haz que Guru-Guru se vaya del canal de voz.')
@@ -131,12 +136,14 @@ async def leave(ctx):
     '¡Escribe el título de tu canción deseada y Guru-Guru te la reproducirá! (IMPORTANTE: haz que se una al chat de voz antes de pedirle que reproduzca nada)'
 )
 async def play(ctx, *, url):
+    global dict
     with yt_dlp.YoutubeDL(ytdl_format_options) as ydl:
         info = ydl.extract_info(url, download=False)
     Entries = []
     for i in info['entries']:
         Entries.append(i)
-    await queue.put(Entries[0])
+    dict[ctx.guild.id] = Entries[0]
+    await queue.put(dict)
     await check_queue(ctx)
 
 
@@ -144,15 +151,17 @@ async def play(ctx, *, url):
     name='añade',
     help='Añade una canción a la cola mientras otra se está reproduciendo.')
 async def add(ctx, *, url):
+    global dict
     with yt_dlp.YoutubeDL(ytdl_format_options) as ydl:
         info = ydl.extract_info(url, download=False)
     Entries = []
     for i in info['entries']:
         Entries.append(i)
+    dict[ctx.guild.id] = Entries[0]
     await ctx.send("¡Canción {} añadida a la cola!".format(
         Entries[0].get("title")))
-    await ctx.send("Hay {} canciones en la cola.".format(queue.qsize()+1))
-    await queue.put(Entries[0])
+    await ctx.send("Hay {} canciones en la cola.".format(queue.qsize() + 1))
+    await queue.put(dict)
 
 
 @bot.command(name='pausa', help='Pon la canción en pausa.')
@@ -173,7 +182,10 @@ async def resume(ctx):
         await ctx.send("No tengo canción que resumir. ¡Pídeme que ponga otra!")
 
 
-@bot.command(name='para', help='Para la canción.')
+@bot.command(
+    name='para',
+    help=
+    'Haz que Guru-Guru se calle. (NECESITA SER EJECUTADO DOS VECES SEGUIDAS)')
 async def stop(ctx):
     a = []
     while not queue.empty():
@@ -200,7 +212,12 @@ async def next(ctx):
 
 @bot.command(name="lista", help="Muestra la lista de canciones pendientes.")
 async def queue_info(ctx):
-    await ctx.send(queue)
+    a = []
+    while not queue.empty():
+        a.append(queue.get_nowait())
+        await ctx.send(a.get("title"))
+    for song in a:
+        await queue.put(a)
 
 
 keep_alive.keep_alive()
